@@ -1,0 +1,80 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  
+  --color-ide-bg: #1e1f22;
+  --color-ide-sidebar: #2b2d30;
+  --color-ide-tab-active: #1e1f22;
+  --color-ide-tab-inactive: #2b2d30;
+  --color-ide-border: #393b40;
+  --color-ide-accent: #3ddc84;
+  --color-ide-text: #bcbec4;
+  --color-ide-text-bright: #ffffff;
+}
+
+:root {
+  background-color: var(--color-ide-bg);
+  color: var(--color-ide-text);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* Scrollbar styling for IDE look */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-ide-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #393b40;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e5157;
+}
+
+.prose {
+  color: var(--color-ide-text);
+}
+
+.prose h1, .prose h2, .prose h3 {
+  color: var(--color-ide-text-bright);
+  font-weight: 600;
+  margin-top: 2rem;
+  margin-bottom: 1rem;
+}
+
+.prose h1 { font-size: 2.25rem; border-bottom: 1px solid var(--color-ide-border); padding-bottom: 1rem; }
+.prose h2 { font-size: 1.5rem; border-bottom: 1px solid var(--color-ide-border); padding-bottom: 0.5rem; }
+
+.prose p {
+  line-height: 1.7;
+  margin-bottom: 1rem;
+}
+
+.prose ul, .prose ol {
+  margin-left: 1.5rem;
+  margin-bottom: 1rem;
+  list-style: disc;
+}
+
+.prose-xs {
+  font-size: 0.75rem;
+}
+
+.prose-xs p {
+  margin-bottom: 0.5rem;
+}
