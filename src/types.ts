@@ -20,6 +20,13 @@ export interface LogEntry {
   level: LogLevel;
   tag: string;
   message: string;
+  type?: 'CRASH' | 'ANR' | 'SYSTEM' | 'GENERAL';
+  structuredData?: {
+    processName?: string;
+    reason?: string;
+    stackTrace?: string[];
+    component?: string;
+  };
 }
 
 export interface Tab {

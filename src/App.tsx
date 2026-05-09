@@ -14,7 +14,10 @@ import {
   ChevronDown,
   FileText,
   Activity,
-  Code
+  Code,
+  AlertTriangle,
+  Zap,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import ReactMarkdown from 'react-markdown';
@@ -519,7 +522,43 @@ function LogcatAnalyzer() {
   const levels: LogLevel[] = ['V', 'D', 'I', 'W', 'E', 'F'];
   const levelWeights: Record<LogLevel, number> = { 'V': 0, 'D': 1, 'I': 2, 'W': 3, 'E': 4, 'F': 5 };
 
-  const filteredLogs = SAMPLE_LOGS.filter(log => {
+  const parseLogLine = (log: LogEntry): LogEntry => {
+    const msg = log.message;
+    let type: LogEntry['type'] = 'GENERAL';
+    let structuredData: LogEntry['structuredData'] = {};
+
+    if (msg.includes('FATAL EXCEPTION') || msg.includes('FATAL') || log.level === 'F') {
+      type = 'CRASH';
+      const lines = msg.split('\n');
+      const processLine = lines.find(l => l.includes('Process:'));
+      if (processLine) {
+        structuredData.processName = processLine.split('Process:')[1].split(',')[0].trim();
+      }
+      const stackTrace = lines.filter(l => l.trim().startsWith('at ')).map(l => l.trim());
+      if (stackTrace.length > 0) {
+        structuredData.stackTrace = stackTrace;
+        const mainFrame = stackTrace[0].split('at ')[1];
+        structuredData.component = mainFrame.includes('(') ? mainFrame.split('(')[0] : mainFrame;
+      }
+    } else if (msg.includes('ANR in')) {
+      type = 'ANR';
+      const lines = msg.split('\n');
+      const anrLine = lines.find(l => l.includes('ANR in'));
+      if (anrLine) {
+        structuredData.processName = anrLine.split('ANR in')[1].trim();
+      }
+      const reasonLine = lines.find(l => l.includes('Reason:'));
+      if (reasonLine) {
+        structuredData.reason = reasonLine.split('Reason:')[1].trim();
+      }
+    } else if (['ActivityManager', 'SystemServer', 'PowerManagerService', 'SurfaceFlinger', 'Binder'].includes(log.tag)) {
+      type = 'SYSTEM';
+    }
+
+    return { ...log, type, structuredData };
+  };
+
+  const filteredLogs = SAMPLE_LOGS.map(parseLogLine).filter(log => {
     const matchesFilter = log.tag.toLowerCase().includes(filter.toLowerCase()) || 
                          log.message.toLowerCase().includes(filter.toLowerCase());
     const matchesLevel = levelWeights[log.level] >= levelWeights[minLevel];
@@ -531,14 +570,24 @@ function LogcatAnalyzer() {
     setAiExplanation(null);
     setAiLoading(true);
 
+    const structuredContext = log.type !== 'GENERAL' ? `
+Structured Analysis:
+- Type: ${log.type}
+- Process: ${log.structuredData?.processName || 'Unknown'}
+- Component: ${log.structuredData?.component || 'N/A'}
+- Reason: ${log.structuredData?.reason || 'N/A'}
+` : '';
+
     try {
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [
-          { role: 'user', parts: [{ text: `Explain this Android Logcat entry. What does it mean in the context of AOSP development? Log: [${log.level}/${log.tag}] ${log.message}` }] }
+          { role: 'user', parts: [{ text: `Explain this Android Logcat entry. ${structuredContext}
+          
+Log: [${log.level}/${log.tag}] ${log.message}` }] }
         ],
         config: {
-          systemInstruction: "You are an expert AOSP platform engineer. You provide concise, deeply technical explanations for Logcat entries, pointing out common causes and debugging tips."
+          systemInstruction: "You are an expert AOSP platform engineer. Provide concise, deeply technical explanations for Logcat entries. For crashes/ANRs, focus on the likely root cause in the platform source code and suggest specific debugging steps (e.g., check certain files or run adb commands)."
         }
       });
       setAiExplanation(response.text || "Could not generate explanation.");
@@ -587,16 +636,24 @@ function LogcatAnalyzer() {
                 key={log.id} 
                 onClick={() => explainLog(log)}
                 className={cn(
-                  "grid grid-cols-[140px_40px_100px_1fr] gap-2 px-3 py-1 cursor-pointer transition-colors border-b border-white/[0.02]",
+                  "grid grid-cols-[140px_40px_100px_1fr] gap-2 px-3 py-2 cursor-pointer transition-colors border-b border-white/[0.02] items-start group",
                   selectedLog?.id === log.id ? "bg-[#393b40] text-white" : "hover:bg-white/[0.05]",
                   log.level === 'E' || log.level === 'F' ? "text-red-400" : 
                   log.level === 'W' ? "text-yellow-400" : "text-[#bcbec4]"
                 )}
               >
-                <div className="opacity-50">{log.timestamp}</div>
+                <div className="opacity-50 text-[10px] pt-0.5">{log.timestamp}</div>
                 <div className="font-bold">{log.level}</div>
-                <div className="font-bold truncate">{log.tag}</div>
-                <div className="truncate group relative" title={log.message}>{log.message}</div>
+                <div className="font-bold truncate flex items-center gap-1">
+                   {log.type === 'CRASH' && <Zap className="w-3 h-3 text-red-500" />}
+                   {log.type === 'ANR' && <AlertTriangle className="w-3 h-3 text-yellow-500" />}
+                   {log.type === 'SYSTEM' && <Info className="w-3 h-3 text-blue-400" />}
+                   {log.tag}
+                </div>
+                <div className="break-all line-clamp-1 group-hover:line-clamp-none transition-all" title={log.message}>
+                  {log.message.split('\n')[0]}
+                  {log.message.includes('\n') && <span className="ml-2 text-[9px] px-1 bg-white/10 rounded uppercase opacity-50">Multi-line</span>}
+                </div>
               </div>
             ))}
           </div>
@@ -607,30 +664,82 @@ function LogcatAnalyzer() {
             <Activity className="w-4 h-4 text-[#3ddc84]" />
             <span className="text-[10px] font-bold uppercase tracking-widest text-[#6f737a]">Entry Analysis</span>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
+          <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4 scrollbar-dark">
             {selectedLog ? (
               <>
-                <div className="space-y-1">
-                  <div className="text-[9px] text-[#6f737a] uppercase font-bold">Log Identity</div>
-                  <div className="text-xs font-mono text-white bg-black/30 p-2 rounded border border-white/5">
-                    PID: {selectedLog.pid} | TID: {selectedLog.tid}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="text-[9px] text-[#6f737a] uppercase font-black tracking-widest">Metadata</div>
+                    <span className={cn(
+                      "px-1.5 py-0.5 rounded text-[8px] font-bold uppercase",
+                      selectedLog.type === 'CRASH' ? "bg-red-500/20 text-red-400 border border-red-500/30" :
+                      selectedLog.type === 'ANR' ? "bg-yellow-500/20 text-yellow-400 border border-yellow-500/30" :
+                      selectedLog.type === 'SYSTEM' ? "bg-blue-500/20 text-blue-400 border border-blue-500/30" :
+                      "bg-white/5 text-[#6f737a] border border-white/10"
+                    )}>
+                      {selectedLog.type || 'GENERAL'}
+                    </span>
+                  </div>
+                  
+                  <div className="text-[11px] font-mono p-3 bg-black/40 rounded-xl border border-white/5 space-y-2">
+                    <div className="flex justify-between border-b border-white/5 pb-1.5 mb-1.5">
+                      <span className="text-[#6f737a]">PID:</span>
+                      <span className="text-white">{selectedLog.pid}</span>
+                    </div>
+                    <div className="flex justify-between border-b border-white/5 pb-1.5 mb-1.5">
+                      <span className="text-[#6f737a]">TID:</span>
+                      <span className="text-white">{selectedLog.tid}</span>
+                    </div>
+                    {selectedLog.structuredData?.processName && (
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[#6f737a]">Process:</span>
+                        <span className="text-[#3ddc84] break-all">{selectedLog.structuredData.processName}</span>
+                      </div>
+                    )}
+                    {selectedLog.structuredData?.reason && (
+                      <div className="flex flex-col gap-1 border-t border-white/5 pt-1.5 mt-1.5">
+                        <span className="text-[#6f737a]">Reason:</span>
+                        <span className="text-yellow-400 italic font-sans">{selectedLog.structuredData.reason}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="space-y-2">
-                  <div className="text-[9px] text-[#6f737a] uppercase font-bold">AI Insight</div>
-                  <div className="bg-[#1e1f22] rounded-lg p-3 border border-[#3ddc84]/20 min-h-[100px]">
+
+                {selectedLog.structuredData?.stackTrace && (
+                  <div className="space-y-2">
+                    <div className="text-[9px] text-[#6f737a] uppercase font-black tracking-widest">Critical Trace</div>
+                    <div className="bg-[#1e1f22] p-3 rounded-xl border border-red-500/10 text-[10px] font-mono overflow-x-hidden">
+                      {selectedLog.structuredData.stackTrace.slice(0, 3).map((line, i) => (
+                        <div key={i} className="text-red-400/80 truncate mb-1" title={line}>
+                          {line}
+                        </div>
+                      ))}
+                      {selectedLog.structuredData.stackTrace.length > 3 && (
+                        <div className="text-[#6f737a] italic mt-1">+ {selectedLog.structuredData.stackTrace.length - 3} more frames</div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                <div className="space-y-2 border-t border-white/5 pt-4">
+                  <div className="flex items-center gap-2">
+                    <div className="text-[9px] text-[#6f737a] uppercase font-black tracking-widest">AOSP Agent Insights</div>
+                    {aiLoading && <div className="w-1 h-1 bg-[#3ddc84] rounded-full animate-ping"></div>}
+                  </div>
+                  <div className="bg-[#1e1f22] rounded-xl p-4 border border-[#3ddc84]/20 min-h-[160px] shadow-inner relative overflow-hidden">
                     {aiLoading ? (
-                      <div className="flex items-center gap-2 text-[10px] text-[#3ddc84] animate-pulse h-full">
-                        <Cpu className="w-3 h-3 spin" />
-                        DECODING_SYSTEM_EVENT...
+                      <div className="flex flex-col items-center justify-center gap-3 h-32">
+                        <Cpu className="w-6 h-6 text-[#3ddc84] animate-spin opacity-50" />
+                        <div className="text-[9px] text-[#3ddc84] font-mono tracking-tighter uppercase">Analyzing_Internal_State...</div>
                       </div>
                     ) : aiExplanation ? (
                       <div className="markdown-body prose prose-invert prose-xs leading-normal">
                         <ReactMarkdown>{aiExplanation}</ReactMarkdown>
                       </div>
                     ) : (
-                      <div className="text-[10px] text-[#6f737a] italic text-center pt-8">
-                        Select a log entry to generate an AI-powered explanation.
+                      <div className="flex flex-col items-center justify-center h-32 opacity-30">
+                         <MessageSquare className="w-8 h-8 mb-2" />
+                         <span className="text-[10px] italic text-center text-[#bcbec4]">Click to generate analysis</span>
                       </div>
                     )}
                   </div>
